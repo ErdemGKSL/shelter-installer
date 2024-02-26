@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use platform_dirs::AppDirs;
 use ascii::ToAsciiChar;
+use tokio::time::sleep;
 
 #[derive(Clone)]
 enum Type {
@@ -19,14 +20,6 @@ impl Type {
     }
   }
 }
-
-// impl From<&str> for Type {
-//   fn from(value: &str) -> Self {
-//     match value {
-//       _ -> Type::STD
-//     }
-//   }
-// }
 
 impl From<&str> for Type {
   fn from(s: &str) -> Self {
@@ -61,8 +54,6 @@ async fn main() {
   println!("Type: {}", discord_type.as_dirname());
   let result = toggle_inject(discord_type).await;
   println!("{result:?}");
-
-  wait_key("Press enter to continue...");
 }
 
 async fn toggle_inject(discord_type: Type) -> Result<(), String> {
@@ -155,9 +146,11 @@ fn get_resources_folder(discord_type: Type, xdg: bool) -> Result<(PathBuf, bool)
 }
 
 fn wait_key(msg: &str) -> String {
+  std::io::stdout().flush().unwrap();
   print!("{msg}");
   std::io::stdout().flush().unwrap();
   let mut buffer = [0u8; 1];
   std::io::stdin().read_exact(&mut buffer).unwrap_or(());
+  
   (*buffer.get(0).unwrap_or(&0)).to_ascii_char().unwrap().to_string().to_lowercase()
 }
