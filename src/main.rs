@@ -43,8 +43,8 @@ async fn main() {
   let arg = args.get(1);
   let discord_type: Type = arg.map(|s| s.to_string()).unwrap_or_else(|| {
     println!("\
-     Type D for standart discord
-     Type P for discord ptb
+     Type D for standart discord\n\
+     Type P for discord ptb\n\
      Type C for discord canary\
     ");
     
