@@ -1,9 +1,7 @@
-use std::error::Error;
-use std::fs::FileType;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use platform_dirs::{AppDirs, UserDirs};
-use reqwest::Client;
+use std::path::PathBuf;
+use platform_dirs::AppDirs;
+use ascii::ToAsciiChar;
 
 #[derive(Clone)]
 enum Type {
@@ -22,6 +20,24 @@ impl Type {
   }
 }
 
+// impl From<&str> for Type {
+//   fn from(value: &str) -> Self {
+//     match value {
+//       _ -> Type::STD
+//     }
+//   }
+// }
+
+impl From<&str> for Type {
+  fn from(s: &str) -> Self {
+    match s.to_lowercase().as_str() {
+      "ptb" | "discordptb" | "p" => Self::PTB,
+      "can" | "canary" | "c" => Self::CAN,
+      _ => Self::STD,
+    }
+  }
+}
+
 const DOWNLOAD_FILES: [&str; 3] = [
   "https://raw.githubusercontent.com/uwu/shelter/main/injectors/desktop/app/index.js",
   "https://raw.githubusercontent.com/uwu/shelter/main/injectors/desktop/app/preload.js",
@@ -30,27 +46,38 @@ const DOWNLOAD_FILES: [&str; 3] = [
 
 #[tokio::main]
 async fn main() {
+  let args: Vec<_> = std::env::args().into_iter().collect();
+  let arg = args.get(1);
+  let discord_type: Type = arg.map(|s| s.to_string()).unwrap_or_else(|| {
+    println!("\
+     Type D for standart discord
+     Type P for discord ptb
+     Type C for discord canary\
+    ");
+    
+    wait_key("Type: ")
+  }).as_str().into();
   
-  let result = toggle_inject(Type::PTB).await;
-  
+  println!("Type: {}", discord_type.as_dirname());
+  let result = toggle_inject(discord_type).await;
   println!("{result:?}");
 
-  wait_key();
+  wait_key("Press enter to continue...");
 }
 
 async fn toggle_inject(discord_type: Type) -> Result<(), String> {
   let (resources, installed) = get_resources_folder(discord_type.clone(), true).or(get_resources_folder(discord_type, false))?;
 
   let app_path = resources.join("app");
-  
+
   if installed {
     std::fs::remove_dir_all(app_path).map_err(|_| "Couldn't remove app folder in the resources while uninstalling.")?;
-    
+
     std::fs::rename(
       resources.join("original.asar"),
       resources.join("app.asar")
     ).map_err(|_| "Couldn't rename the original.asar in the resources while uninstalling.")?;
-    
+
     return Ok(());
   }
 
@@ -58,10 +85,10 @@ async fn toggle_inject(discord_type: Type) -> Result<(), String> {
     resources.join("app.asar"),
     resources.join("original.asar")
   ).map_err(|_| "Couldn't rename the app.asar in the resources while installing.")?;
-  
+
   std::fs::create_dir_all(&app_path)
       .map_err(|_| "Couldn't create app directory while installing.")?;
-  
+
   for file_url in DOWNLOAD_FILES {
     let file_name = file_url.split("/").last().unwrap();
 
@@ -77,7 +104,7 @@ async fn download_file(path: PathBuf, url: String) -> Result<(), String> {
       .text()
       .await
       .map_err(|_| format!("Couldn't parse data from {url}"))?;
-  
+
   std::fs::write(&path, content)
       .map_err(|_| format!("Couldn't write data to {}", path.display()))?;
 
@@ -127,8 +154,10 @@ fn get_resources_folder(discord_type: Type, xdg: bool) -> Result<(PathBuf, bool)
   ))
 }
 
-fn wait_key() {
-  println!("Press any key to continue...");
+fn wait_key(msg: &str) -> String {
+  print!("{msg}");
+  std::io::stdout().flush().unwrap();
   let mut buffer = [0u8; 1];
-  std::io::stdin().read_exact(&mut buffer).unwrap();
+  std::io::stdin().read_exact(&mut buffer).unwrap_or(());
+  (*buffer.get(0).unwrap_or(&0)).to_ascii_char().unwrap().to_string().to_lowercase()
 }
