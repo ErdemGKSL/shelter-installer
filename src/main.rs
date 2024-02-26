@@ -1,22 +1,11 @@
-use std::fmt::format;
+use std::error::Error;
 use std::fs::FileType;
-use std::io::Read;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use platform_dirs::{AppDirs, UserDirs};
+use reqwest::Client;
 
-fn main() {
-  
-  match inject() {
-    Ok(result) => {
-      println!("{result}");
-    }
-    Err(result) => {
-      println!("ERROR: {result}");
-    }
-  }
- 
-  wait_key();
-}
-
+#[derive(Clone)]
 enum Type {
   STD,
   PTB,
@@ -33,15 +22,78 @@ impl Type {
   }
 }
 
-const TYPE: Type = Type::CAN;
+const DOWNLOAD_FILES: [&str; 3] = [
+  "https://raw.githubusercontent.com/uwu/shelter/main/injectors/desktop/app/index.js",
+  "https://raw.githubusercontent.com/uwu/shelter/main/injectors/desktop/app/preload.js",
+  "https://raw.githubusercontent.com/uwu/shelter/main/injectors/desktop/app/package.json"
+];
 
-fn inject() -> Result<String, String> {
-  let user_dirs = AppDirs::new(None, false);
-  let app_data = user_dirs.ok_or("Couldn't find data directoryy")?.data_dir;
-  println!("Local appdata path: {}", app_data.display());
+#[tokio::main]
+async fn main() {
   
+  let result = toggle_inject(Type::PTB).await;
+  
+  println!("{result:?}");
+
+  wait_key();
+}
+
+async fn toggle_inject(discord_type: Type) -> Result<(), String> {
+  let (resources, installed) = get_resources_folder(discord_type.clone(), true).or(get_resources_folder(discord_type, false))?;
+
+  let app_path = resources.join("app");
+  
+  if installed {
+    std::fs::remove_dir_all(app_path).map_err(|_| "Couldn't remove app folder in the resources while uninstalling.")?;
+    
+    std::fs::rename(
+      resources.join("original.asar"),
+      resources.join("app.asar")
+    ).map_err(|_| "Couldn't rename the original.asar in the resources while uninstalling.")?;
+    
+    return Ok(());
+  }
+
+  std::fs::rename(
+    resources.join("app.asar"),
+    resources.join("original.asar")
+  ).map_err(|_| "Couldn't rename the app.asar in the resources while installing.")?;
+  
+  std::fs::create_dir_all(&app_path)
+      .map_err(|_| "Couldn't create app directory while installing.")?;
+  
+  for file_url in DOWNLOAD_FILES {
+    let file_name = file_url.split("/").last().unwrap();
+
+    download_file(app_path.join(file_name), file_url.to_string()).await?;
+  }
+  Ok(())
+}
+
+async fn download_file(path: PathBuf, url: String) -> Result<(), String> {
+  let content = reqwest::get(url.clone())
+      .await
+      .map_err(|_| format!("Couldn't fetch data from {url}"))?
+      .text()
+      .await
+      .map_err(|_| format!("Couldn't parse data from {url}"))?;
+  
+  std::fs::write(&path, content)
+      .map_err(|_| format!("Couldn't write data to {}", path.display()))?;
+
+  Ok(())
+}
+
+fn get_data_dir(xdg: bool) -> Result<PathBuf, String> {
+  let user_dirs = AppDirs::new(None, xdg);
+  Ok(user_dirs.ok_or("Couldn't find data directory")?.data_dir)
+}
+
+fn get_resources_folder(discord_type: Type, xdg: bool) -> Result<(PathBuf, bool), String> {
+  let app_data = get_data_dir(xdg)?;
+
   let app_data_path = app_data.as_path();
-  let app_path = app_data_path.join(TYPE.as_dirname());
+  let app_path = app_data_path.join(discord_type.as_dirname());
 
   let app_path = app_path.as_path();
   
@@ -50,7 +102,11 @@ fn inject() -> Result<String, String> {
   let dir = dir
       .filter(|entry| {
         if let Ok(entry) = entry {
-          entry.file_name().to_str().unwrap_or("").to_string().starts_with("app-1.")
+          entry.file_name().to_str().unwrap_or("").to_string().starts_with("app-1.") &&
+              (
+                entry.path().join("resources/app.asar").exists() ||
+                    entry.path().join("resources/original.asar").exists()
+              )
         } else {
           false
         }
@@ -60,11 +116,15 @@ fn inject() -> Result<String, String> {
         entry.path()
       })
       .max()
-      .ok_or("Couldn't find app version directory")?;
-  
-  println!("{:?}", dir);
-  
-  unimplemented!("everything works fine but bro wait this isnt done yet!??")
+      .ok_or("Couldn't find valid app version directory with asar file")?;
+
+  let resources_dir = dir.join("resources");
+  let is_installed = resources_dir.join("original.asar").exists();
+
+  Ok((
+    resources_dir,
+    is_installed
+  ))
 }
 
 fn wait_key() {
